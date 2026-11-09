@@ -1,7 +1,7 @@
 import streamlit as st
 
 # =========================================================
-# FUNÇÕES GERAIS DE CÁLCULO (DRY - Don't Repeat Yourself)
+# FUNÇÕES GERAIS DE CÁLCULO (DRY)
 # =========================================================
 
 def calcular_inss(salario_bruto):
@@ -25,7 +25,6 @@ def calcular_inss(salario_bruto):
 
 def calcular_irrf(salario_bruto, inss):
     """Calcula o Imposto de Renda Retido na Fonte (IRRF)."""
-    # Regra condicional de isenção até R$ 5.000 (conforme definido no seu projeto)
     if salario_bruto <= 5000.00:
         return 0.0
     
@@ -41,8 +40,7 @@ def calcular_irrf(salario_bruto, inss):
     elif base_irrf > 2259.20:
         irrf = (base_irrf * 0.075) - 169.44
         
-    return max(0, irrf) # Garante que o IRRF não seja negativo
-
+    return max(0, irrf)
 
 # =========================================================
 # CONFIGURAÇÃO DA PÁGINA
@@ -59,21 +57,28 @@ aba = st.sidebar.radio("Selecione a ferramenta:", ["Plantonista 24x48", "Transi�
 if aba == "Plantonista 24x48":
     st.header("--- CALCULADORA PLANTONISTA HORISTA 24x48 ---")
     
-    salario_hora = st.number_input("1. Salário Hora: R$ ", min_value=0.0, value=12.15, step=0.1)
-    qtd_plantao = st.number_input("2. Quantos plantões você fará no mês: ", min_value=0, value=10)
+    col1, col2 = st.columns(2)
+    with col1:
+        salario_hora = st.number_input("1. Salário Hora: R$ ", min_value=0.0, value=12.15, step=0.1)
+    with col2:
+        qtd_plantao = st.number_input("2. Plantões no mês: ", min_value=0, value=10)
 
     tipo_dsr = st.selectbox("O cálculo do DSR é Fixo ou Variável?", ["Fixo por porcentagem", "Variável por calendário"])
 
     if tipo_dsr == "Fixo por porcentagem":
-        porcentagem_dsr = st.number_input("Digite a porcentagem do DSR da empresa: ", min_value=0.0, value=16.66)
+        porcentagem_dsr = st.number_input("Porcentagem do DSR: ", min_value=0.0, value=16.66)
         fator_dsr = porcentagem_dsr / 100
     else:
-        dias_uteis = st.number_input("3. Quantos dias úteis tem no mês: ", min_value=1, value=23)
-        qtd_domingo = st.number_input("4. Quantos domingos tem no mês: ", min_value=0, value=5)
-        qtd_feriado = st.number_input("5. Quantos feriados tem no mês: ", min_value=0, value=2)
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            dias_uteis = st.number_input("Dias úteis no mês: ", min_value=1, value=23)
+        with c2:
+            qtd_domingo = st.number_input("Domingos: ", min_value=0, value=5)
+        with c3:
+            qtd_feriado = st.number_input("Feriados: ", min_value=0, value=2)
         dias_repouso = qtd_domingo + qtd_feriado
 
-    recebe_vt = st.radio("6. Recebe Vale Transporte?", ["Não", "Sim"])
+    recebe_vt = st.radio("Recebe Vale Transporte?", ["Não", "Sim"])
 
     # Cálculos Brutos
     horas_trabalhadas = qtd_plantao * 24
@@ -82,7 +87,6 @@ if aba == "Plantonista 24x48":
     horas_noturnas_reais = 8 * 1.142857
     adicional_noturno = (salario_hora * 0.2) * (horas_noturnas_reais * qtd_plantao)
 
-    # Cálculo do DSR
     if tipo_dsr == "Fixo por porcentagem":
         dsr_reais = salario_base * fator_dsr
         dsr_noturno = adicional_noturno * fator_dsr
@@ -92,10 +96,82 @@ if aba == "Plantonista 24x48":
         dsr_noturno = (adicional_noturno / dias_uteis) * dias_repouso
 
     salario_bruto = salario_base + insalubridade + adicional_noturno + dsr_reais + dsr_noturno
-
-    # Descontos
     desconto_vt = salario_base * 0.06 if recebe_vt == "Sim" else 0.0
     inss = calcular_inss(salario_bruto)
     irrf = calcular_irrf(salario_bruto, inss)
 
     salario_liquido = salario_bruto - inss - irrf - desconto_vt
+
+    # Exibição Imediata (Sem botão)
+    st.markdown("---")
+    st.markdown("### 📋 Extrato de Pagamento")
+    st.write(f"**Salário Base:** R$ {salario_base:.2f}")
+    st.write(f"**Insalubridade (20% Min.):** R$ {insalubridade:.2f}")
+    st.write(f"**Adicional Noturno (20%):** R$ {adicional_noturno:.2f}")
+    st.write(f"**DSR Horista:** R$ {dsr_reais:.2f}")
+    st.write(f"**DSR Noturno:** R$ {dsr_noturno:.2f}")
+    
+    st.success(f"**Salário Bruto:** R$ {salario_bruto:.2f}")
+    st.error(f"**Desconto INSS:** R$ {inss:.2f}")
+    if irrf > 0:
+        st.error(f"**Desconto IRRF:** R$ {irrf:.2f}")
+    if desconto_vt > 0:
+        st.error(f"**Desconto Vale Transporte (6%):** R$ {desconto_vt:.2f}")
+        
+    st.info(f"**LÍQUIDO ESTIMADO NA CONTA:** R$ {salario_liquido:.2f}")
+
+
+# =========================================================
+# ABA 2: TRANSIÇÃO CLT PARA MEI
+# =========================================================
+elif aba == "Transição CLT para MEI":
+    st.header("--- CALCULADORA DE TRANSIÇÃO: CLT PARA MEI ---")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        salario_base = st.number_input("Salário Base CLT: R$ ", min_value=0.0, value=3401.81)
+        insalubridade = st.number_input("Insalubridade: R$ ", min_value=0.0, value=324.20)
+    with col2:
+        vale_alimentacao = st.number_input("Vale Alimentação: R$ ", min_value=0.0, value=600.00)
+        custo_deslocamento = st.number_input("Combustível/Pedágio (Mês): R$ ", min_value=0.0, value=0.0)
+
+    # Cálculos
+    salario_bruto = salario_base + insalubridade
+    inss = calcular_inss(salario_bruto)
+    irrf = calcular_irrf(salario_bruto, inss)
+    salario_liquido = salario_bruto - inss - irrf
+
+    # Provisões Trabalhistas
+    decimo_terceiro = salario_bruto / 12
+    ferias_um_terco = (salario_bruto * 1.333333) / 12
+    fgts = salario_bruto * 0.08
+    multa_fgts = fgts * 0.40
+    custo_mei = 85.00
+
+    ponto_empate = salario_liquido + vale_alimentacao + decimo_terceiro + ferias_um_terco + fgts + multa_fgts + custo_mei + custo_deslocamento
+    valor_ideal = ponto_empate * 1.30 # Margem de 30%
+
+    # Exibição Imediata (Sem botão)
+    st.markdown("---")
+    st.markdown("### 📋 Demonstrativo de Custos e Provisões")
+    
+    st.write(f"**Salário Base de Referência:** R$ {salario_base:.2f}")
+    st.write(f"**Adicional de Insalubridade:** R$ {insalubridade:.2f}")
+    st.success(f"**Salário Bruto CLT:** R$ {salario_bruto:.2f}")
+    
+    st.error(f"**Desconto INSS:** R$ {inss:.2f}")
+    st.error(f"**Desconto IRRF:** R$ {irrf:.2f}")
+    st.write(f"**Líquido na Conta CLT:** R$ {salario_liquido:.2f}")
+    st.write(f"**Vale Alimentação:** R$ {vale_alimentacao:.2f}")
+    
+    st.markdown("#### ⚠️ Custos e Direitos que você perde (Provisão Mensal)")
+    st.write(f"- 13º Salário: R$ {decimo_terceiro:.2f}")
+    st.write(f"- Férias + 1/3: R$ {ferias_um_terco:.2f}")
+    st.write(f"- FGTS + Multa: R$ {(fgts + multa_fgts):.2f}")
+    st.write(f"- Imposto MEI (DAS): R$ {custo_mei:.2f}")
+    if custo_deslocamento > 0:
+        st.write(f"- Deslocamento/Estrada: R$ {custo_deslocamento:.2f}")
+    
+    st.markdown("---")
+    st.info(f"**PONTO DE EMPATE (Mínimo para não perder dinheiro):** R$ {ponto_empate:.2f}")
+    st.success(f"**PEDIDA IDEAL (Com +30% de margem):** R$ {valor_ideal:.2f}")
