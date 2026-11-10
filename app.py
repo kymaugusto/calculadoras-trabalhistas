@@ -1,181 +1,261 @@
 import streamlit as st
 
-# =========================================================
-# FUNÇÕES GERAIS DE CÁLCULO (DRY)
-# =========================================================
-
-def calcular_inss(salario_bruto):
-    """Calcula o INSS Progressivo (Tabela 2026)."""
-    teto_inss = 8475.55
-    base_inss = min(salario_bruto, teto_inss)
-    inss = 0
-    
-    if base_inss > 4354.27:
-        inss += (base_inss - 4354.27) * 0.14
-        base_inss = 4354.27
-    if base_inss > 2902.84:
-        inss += (base_inss - 2902.84) * 0.12
-        base_inss = 2902.84
-    if base_inss > 1621.00:
-        inss += (base_inss - 1621.00) * 0.09
-        base_inss = 1621.00
-    
-    inss += base_inss * 0.075
-    return inss
-
-def calcular_irrf(salario_bruto, inss):
-    """Calcula o Imposto de Renda Retido na Fonte (IRRF)."""
-    if salario_bruto <= 5000.00:
-        return 0.0
-    
-    base_irrf = salario_bruto - inss
-    irrf = 0
-    
-    if base_irrf > 4874.62:
-        irrf = (base_irrf * 0.275) - 931.11
-    elif base_irrf > 3920.35:
-        irrf = (base_irrf * 0.225) - 687.38
-    elif base_irrf > 2940.29:
-        irrf = (base_irrf * 0.15) - 393.35
-    elif base_irrf > 2259.20:
-        irrf = (base_irrf * 0.075) - 169.44
-        
-    return max(0, irrf)
-
-# =========================================================
-# CONFIGURAÇÃO DA PÁGINA
-# =========================================================
-
 st.set_page_config(page_title="Calculadoras Trabalhistas", layout="centered")
 
-st.title("📊 Painel de Análise Trabalhista")
-aba = st.sidebar.radio("Selecione a ferramenta:", ["Plantonista 24x48", "Transição CLT para MEI"])
+# =========================================================
+# CONSTANTES (conferir e atualizar todo janeiro)
+# =========================================================
+SALARIO_MINIMO = 1621.00
+TETO_INSS = 8475.55
+FAIXAS_INSS = [  # (limite superior, aliquota)
+    (1621.00, 0.075),
+    (2902.84, 0.09),
+    (4354.27, 0.12),
+    (8475.55, 0.14),
+]
+
+# IRRF mensal 2026 (Lei 15.270/2025)
+DESCONTO_SIMPLIFICADO = 607.20
+LIMITE_ISENCAO_IRRF = 5000.00
+LIMITE_REDUTOR_IRRF = 7350.00
+FAIXAS_IRRF = [  # (limite superior da base, aliquota, parcela a deduzir)
+    (2428.80, 0.0, 0.0),
+    (2826.65, 0.075, 182.16),
+    (3751.05, 0.15, 394.16),
+    (4664.68, 0.225, 675.49),
+    (float("inf"), 0.275, 908.73),
+]
+
+# MEI
+LIMITE_MEI_ANUAL = 81000.00  # sobe para 110 mil em 2027
+DAS_MEI = {
+    "Comércio/Indústria": 82.05,
+    "Serviços": 86.05,
+    "Comércio e Serviços": 87.05,
+}
+
+
+# =========================================================
+# FUNÇÕES DE CÁLCULO
+# =========================================================
+def brl(valor):
+    """Formata em reais: R$ 1.234,56."""
+    texto = f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"R$ {texto}"
+
+
+def calcular_inss(salario_bruto):
+    """INSS progressivo (tabela 2026)."""
+    base = min(salario_bruto, TETO_INSS)
+    inss, piso = 0.0, 0.0
+    for limite, aliquota in FAIXAS_INSS:
+        if base > piso:
+            inss += (min(base, limite) - piso) * aliquota
+        piso = limite
+    return inss
+
+
+def calcular_irrf(salario_bruto, inss):
+    """IRRF mensal 2026: isenção até 5.000 e redutor decrescente até 7.350.
+    Não considera dependentes nem pensão."""
+    if salario_bruto <= LIMITE_ISENCAO_IRRF:
+        return 0.0
+
+    base = salario_bruto - max(inss, DESCONTO_SIMPLIFICADO)
+    imposto = 0.0
+    for limite, aliquota, deducao in FAIXAS_IRRF:
+        if base <= limite:
+            imposto = max(0.0, base * aliquota - deducao)
+            break
+
+    reducao = 0.0
+    if salario_bruto <= LIMITE_REDUTOR_IRRF:
+        reducao = 978.62 - 0.133145 * salario_bruto
+    return max(0.0, imposto - reducao)
+
 
 # =========================================================
 # ABA 1: PLANTONISTA HORISTA 24X48
 # =========================================================
-if aba == "Plantonista 24x48":
-    st.header("--- CALCULADORA PLANTONISTA HORISTA 24x48 ---")
-    
+def aba_plantonista():
+    st.subheader("Calculadora plantonista horista 24x48")
+
     col1, col2 = st.columns(2)
     with col1:
-        salario_hora = st.number_input("1. Salário Hora: R$ ", min_value=0.0, value=12.15, step=0.1)
+        salario_hora = st.number_input("1. Salário hora: R$", min_value=0.0, value=12.15, step=0.1)
     with col2:
-        qtd_plantao = st.number_input("2. Plantões no mês: ", min_value=0, value=10)
+        qtd_plantao = st.number_input("2. Plantões no mês:", min_value=0, max_value=15, value=10)
 
-    tipo_dsr = st.selectbox("O cálculo do DSR é Fixo ou Variável?", ["Fixo por porcentagem", "Variável por calendário"])
+    horas_noturnas = st.number_input(
+        "Horas noturnas reais por plantão (já com a hora reduzida de 52min30s aplicada abaixo):",
+        min_value=0.0, max_value=12.0, value=8.0, step=0.5,
+    )
+    tipo_dsr = st.selectbox("O cálculo do DSR é fixo ou variável?", ["Fixo por porcentagem", "Variável por calendário"])
 
+    fator_dsr = 0.0
+    dias_uteis, dias_repouso = 1, 0
     if tipo_dsr == "Fixo por porcentagem":
-        porcentagem_dsr = st.number_input("Porcentagem do DSR: ", min_value=0.0, value=16.66)
-        fator_dsr = porcentagem_dsr / 100
+        fator_dsr = st.number_input("Porcentagem do DSR:", min_value=0.0, value=16.66) / 100
     else:
         c1, c2, c3 = st.columns(3)
         with c1:
-            dias_uteis = st.number_input("Dias úteis no mês: ", min_value=1, value=23)
+            dias_uteis = st.number_input("Dias úteis no mês:", min_value=1, value=23)
         with c2:
-            qtd_domingo = st.number_input("Domingos: ", min_value=0, value=5)
+            qtd_domingo = st.number_input("Domingos:", min_value=0, value=5)
         with c3:
-            qtd_feriado = st.number_input("Feriados: ", min_value=0, value=2)
+            qtd_feriado = st.number_input("Feriados:", min_value=0, value=2)
         dias_repouso = qtd_domingo + qtd_feriado
 
-    recebe_vt = st.radio("Recebe Vale Transporte?", ["Não", "Sim"])
+    recebe_vt = st.radio("Recebe vale transporte?", ["Não", "Sim"])
 
-    # Cálculos Brutos
+    # Cálculos
     horas_trabalhadas = qtd_plantao * 24
     salario_base = salario_hora * horas_trabalhadas
-    insalubridade = 1621 * 0.2
-    horas_noturnas_reais = 8 * 1.142857
-    adicional_noturno = (salario_hora * 0.2) * (horas_noturnas_reais * qtd_plantao)
+    insalubridade = SALARIO_MINIMO * 0.2 if qtd_plantao > 0 else 0.0
+    horas_noturnas_fictas = horas_noturnas * (60 / 52.5)
+    adicional_noturno = (salario_hora * 0.2) * (horas_noturnas_fictas * qtd_plantao)
 
     if tipo_dsr == "Fixo por porcentagem":
         dsr_reais = salario_base * fator_dsr
         dsr_noturno = adicional_noturno * fator_dsr
     else:
-        dsr = (horas_trabalhadas / dias_uteis) * dias_repouso
-        dsr_reais = dsr * salario_hora
+        dsr_reais = (horas_trabalhadas / dias_uteis) * dias_repouso * salario_hora
         dsr_noturno = (adicional_noturno / dias_uteis) * dias_repouso
 
     salario_bruto = salario_base + insalubridade + adicional_noturno + dsr_reais + dsr_noturno
     desconto_vt = salario_base * 0.06 if recebe_vt == "Sim" else 0.0
     inss = calcular_inss(salario_bruto)
     irrf = calcular_irrf(salario_bruto, inss)
-
     salario_liquido = salario_bruto - inss - irrf - desconto_vt
 
-    # Exibição Imediata (Sem botão)
     st.markdown("---")
-    st.markdown("### 📋 Extrato de Pagamento")
-    st.write(f"**Salário Base:** R$ {salario_base:.2f}")
-    st.write(f"**Insalubridade (20% Min.):** R$ {insalubridade:.2f}")
-    st.write(f"**Adicional Noturno (20%):** R$ {adicional_noturno:.2f}")
-    st.write(f"**DSR Horista:** R$ {dsr_reais:.2f}")
-    st.write(f"**DSR Noturno:** R$ {dsr_noturno:.2f}")
-    
-    st.success(f"**Salário Bruto:** R$ {salario_bruto:.2f}")
-    st.error(f"**Desconto INSS:** R$ {inss:.2f}")
+    st.markdown("### 📋 Extrato de pagamento")
+    st.write(f"**Salário base:** {brl(salario_base)}")
+    st.write(f"**Insalubridade (20% do mínimo):** {brl(insalubridade)}")
+    st.write(f"**Adicional noturno (20%):** {brl(adicional_noturno)}")
+    st.write(f"**DSR horista:** {brl(dsr_reais)}")
+    st.write(f"**DSR noturno:** {brl(dsr_noturno)}")
+    st.success(f"**Salário bruto:** {brl(salario_bruto)}")
+    st.error(f"**Desconto INSS:** {brl(inss)}")
     if irrf > 0:
-        st.error(f"**Desconto IRRF:** R$ {irrf:.2f}")
+        st.error(f"**Desconto IRRF:** {brl(irrf)}")
     if desconto_vt > 0:
-        st.error(f"**Desconto Vale Transporte (6%):** R$ {desconto_vt:.2f}")
-        
-    st.info(f"**LÍQUIDO ESTIMADO NA CONTA:** R$ {salario_liquido:.2f}")
+        st.error(f"**Desconto vale transporte (6%):** {brl(desconto_vt)}")
+    st.info(f"**LÍQUIDO ESTIMADO NA CONTA:** {brl(salario_liquido)}")
 
 
 # =========================================================
 # ABA 2: TRANSIÇÃO CLT PARA MEI
 # =========================================================
-elif aba == "Transição CLT para MEI":
-    st.header("--- CALCULADORA DE TRANSIÇÃO: CLT PARA MEI ---")
-    
+def aba_mei():
+    st.subheader("Calculadora de transição: CLT para MEI")
+
     col1, col2 = st.columns(2)
     with col1:
-        salario_base = st.number_input("Salário Base CLT: R$ ", min_value=0.0, value=3291.60)
-        insalubridade = st.number_input("Insalubridade: R$ ", min_value=0.0, value=324.20)
+        salario_base = st.number_input("Salário base CLT: R$", min_value=0.0, value=2532.00, step=50.0)
+        gratificacao_pct = st.number_input("Gratificação de função (%):", min_value=0.0, value=30.0, step=5.0)
+        insalubridade = st.number_input("Insalubridade: R$", min_value=0.0, value=324.20)
     with col2:
-        vale_alimentacao = st.number_input("Vale Alimentação (Por fora): R$ ", min_value=0.0, value=600.00)
-        custo_deslocamento = st.number_input("Combustível/Pedágio (Mês): R$ ", min_value=0.0, value=0.0)
+        vale_alimentacao = st.number_input("Vale alimentação (por fora): R$", min_value=0.0, value=600.00)
+        custo_deslocamento = st.number_input("Combustível/pedágio (mês): R$", min_value=0.0, value=0.0)
+        proposta = st.number_input("Valor da nota proposto pela empresa: R$", min_value=0.0, value=3500.00, step=100.0)
+
+    atividade = st.selectbox("Atividade do MEI (define o valor do DAS):", list(DAS_MEI), index=1)
 
     # Cálculos
-    salario_bruto = salario_base + insalubridade
+    valor_gratificacao = salario_base * (gratificacao_pct / 100)
+    salario_bruto = salario_base + valor_gratificacao + insalubridade
     inss = calcular_inss(salario_bruto)
     irrf = calcular_irrf(salario_bruto, inss)
     salario_liquido = salario_bruto - inss - irrf
 
-    # Provisões Trabalhistas
     decimo_terceiro = salario_bruto / 12
-    ferias_um_terco = (salario_bruto * 1.333333) / 12
+    ferias_um_terco = (salario_bruto * 4 / 3) / 12
     fgts = salario_bruto * 0.08
     multa_fgts = fgts * 0.40
-    custo_mei = 85.00
+    custo_mei = DAS_MEI[atividade]
 
-    # NOVO CÁLCULO: Vale alimentação removido da soma do ponto de empate
-    ponto_empate = salario_liquido + decimo_terceiro + ferias_um_terco + fgts + multa_fgts + custo_mei + custo_deslocamento
-    valor_ideal = ponto_empate * 1.30 # Margem de 30%
+    ponto_empate = (
+        salario_liquido
+        + decimo_terceiro
+        + ferias_um_terco
+        + fgts
+        + multa_fgts
+        + custo_mei
+        + custo_deslocamento
+    )
+    valor_ideal = ponto_empate * 1.30
 
-    # Exibição Imediata (Sem botão)
     st.markdown("---")
-    st.markdown("### 📋 Demonstrativo de Custos e Provisões")
-    
-    st.write(f"**Salário Base de Referência:** R$ {salario_base:.2f}")
-    st.write(f"**Adicional de Insalubridade:** R$ {insalubridade:.2f}")
-    st.success(f"**Salário Bruto CLT:** R$ {salario_bruto:.2f}")
-    
-    st.error(f"**Desconto INSS:** R$ {inss:.2f}")
-    st.error(f"**Desconto IRRF:** R$ {irrf:.2f}")
-    st.write(f"**Líquido na Conta CLT:** R$ {salario_liquido:.2f}")
-    
-    st.markdown("#### ⚠️ Custos e Direitos que você perde (Provisão Mensal)")
-    st.write(f"- 13º Salário: R$ {decimo_terceiro:.2f}")
-    st.write(f"- Férias + 1/3: R$ {ferias_um_terco:.2f}")
-    st.write(f"- FGTS + Multa: R$ {(fgts + multa_fgts):.2f}")
-    st.write(f"- Imposto MEI (DAS): R$ {custo_mei:.2f}")
+    st.markdown("### 📋 Demonstrativo de custos e provisões")
+    st.write(f"**Salário base de referência:** {brl(salario_base)}")
+    if valor_gratificacao > 0:
+        st.write(f"**Gratificação de função ({gratificacao_pct:.0f}%):** {brl(valor_gratificacao)}")
+    st.write(f"**Adicional de insalubridade:** {brl(insalubridade)}")
+    st.success(f"**Salário bruto CLT:** {brl(salario_bruto)}")
+    st.error(f"**Desconto INSS:** {brl(inss)}")
+    st.error(f"**Desconto IRRF:** {brl(irrf)}")
+    st.write(f"**Líquido na conta CLT:** {brl(salario_liquido)}")
+
+    st.markdown("#### ⚠️ Direitos que você perde (provisão mensal)")
+    st.write(f"- 13º salário: {brl(decimo_terceiro)}")
+    st.write(f"- Férias + 1/3: {brl(ferias_um_terco)}")
+    st.write(f"- FGTS + multa: {brl(fgts + multa_fgts)}")
+    st.write(f"- Imposto MEI (DAS): {brl(custo_mei)}")
     if custo_deslocamento > 0:
-        st.write(f"- Deslocamento/Estrada: R$ {custo_deslocamento:.2f}")
-    
+        st.write(f"- Deslocamento/estrada: {brl(custo_deslocamento)}")
+    st.caption("Estimativa conservadora: inclui a multa do FGTS e não desconta imposto do 13º e das férias.")
+
     st.markdown("---")
-    st.info(f"**PONTO DE EMPATE (Mínimo para não perder dinheiro):** R$ {ponto_empate:.2f}")
-    st.success(f"**PEDIDA IDEAL (Com +30% de margem):** R$ {valor_ideal:.2f}")
-    
-    # Destacando que o VA deve ser cobrado por fora
+    st.info(f"**PONTO DE EMPATE (mínimo para não perder dinheiro):** {brl(ponto_empate)}")
+    st.success(f"**PEDIDA IDEAL (+30% de margem):** {brl(valor_ideal)}")
+
+    # Comparação com a proposta recebida
+    st.markdown("### 🤝 Análise da proposta recebida")
+    liquido_mei = proposta - custo_mei - custo_deslocamento
+    ganho_liquidez = liquido_mei - salario_liquido
+
+    st.write(
+        f"**Dinheiro limpo no bolso no mês (Proposta - DAS):** {brl(liquido_mei)} "
+        f"({brl(ganho_liquidez)} de diferença em relação ao líquido CLT)"
+    )
+
+    diferenca = proposta - ponto_empate
+    if diferenca < 0:
+        st.error(
+            f"Considerando 13º, férias e FGTS, a proposta de {brl(proposta)} fica {brl(-diferenca)} por mês "
+            f"({brl(-diferenca * 12)} por ano) **abaixo** do ponto de empate."
+        )
+    else:
+        st.success(
+            f"Considerando 13º, férias e FGTS, a proposta de {brl(proposta)} fica {brl(diferenca)} por mês "
+            f"({brl(diferenca * 12)} por ano) **acima** do ponto de empate."
+        )
+
+    # Limite de faturamento do MEI
+    for rotulo, nota in [("proposta", proposta), ("pedida ideal", valor_ideal)]:
+        anual = (nota + vale_alimentacao) * 12
+        if anual > LIMITE_MEI_ANUAL:
+            st.warning(
+                f"Atenção ao limite do MEI: {rotulo} + VA = {brl(anual)} por ano, "
+                f"acima de {brl(LIMITE_MEI_ANUAL)} (se o VA entrar na nota)."
+            )
+
     if vale_alimentacao > 0:
-        st.warning(f"🍔 **LEMBRETE:** Acrescentar R$ {vale_alimentacao:.2f} referentes à alimentação por fora no valor da nota ou no contrato.")
+        st.warning(
+            f"🍔 Lembrete: combine os {brl(vale_alimentacao)} de alimentação por escrito "
+            "(contrato ou fora da nota), pois valores na nota contam no limite anual do MEI."
+        )
+
+
+# =========================================================
+# INTERFACE PRINCIPAL
+# =========================================================
+st.title("📊 Painel de Análise Trabalhista")
+tab1, tab2 = st.tabs(["Plantonista 24x48", "Transição CLT para MEI"])
+
+with tab1:
+    aba_plantonista()
+
+with tab2:
+    aba_mei()
