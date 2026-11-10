@@ -129,7 +129,7 @@ elif aba == "Transição CLT para MEI":
     
     col1, col2 = st.columns(2)
     with col1:
-        salario_base = st.number_input("Salário Base CLT: R$ ", min_value=0.0, value=3401.81)
+        salario_base = st.number_input("Salário Base CLT: R$ ", min_value=0.0, value=3291.60)
         insalubridade = st.number_input("Insalubridade: R$ ", min_value=0.0, value=324.20)
     with col2:
         vale_alimentacao = st.number_input("Vale Alimentação (Por fora): R$ ", min_value=0.0, value=600.00)
