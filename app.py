@@ -132,7 +132,7 @@ elif aba == "Transição CLT para MEI":
         salario_base = st.number_input("Salário Base CLT: R$ ", min_value=0.0, value=3401.81)
         insalubridade = st.number_input("Insalubridade: R$ ", min_value=0.0, value=324.20)
     with col2:
-        vale_alimentacao = st.number_input("Vale Alimentação: R$ ", min_value=0.0, value=600.00)
+        vale_alimentacao = st.number_input("Vale Alimentação (Por fora): R$ ", min_value=0.0, value=600.00)
         custo_deslocamento = st.number_input("Combustível/Pedágio (Mês): R$ ", min_value=0.0, value=0.0)
 
     # Cálculos
@@ -148,7 +148,8 @@ elif aba == "Transição CLT para MEI":
     multa_fgts = fgts * 0.40
     custo_mei = 85.00
 
-    ponto_empate = salario_liquido + vale_alimentacao + decimo_terceiro + ferias_um_terco + fgts + multa_fgts + custo_mei + custo_deslocamento
+    # NOVO CÁLCULO: Vale alimentação removido da soma do ponto de empate
+    ponto_empate = salario_liquido + decimo_terceiro + ferias_um_terco + fgts + multa_fgts + custo_mei + custo_deslocamento
     valor_ideal = ponto_empate * 1.30 # Margem de 30%
 
     # Exibição Imediata (Sem botão)
@@ -162,7 +163,6 @@ elif aba == "Transição CLT para MEI":
     st.error(f"**Desconto INSS:** R$ {inss:.2f}")
     st.error(f"**Desconto IRRF:** R$ {irrf:.2f}")
     st.write(f"**Líquido na Conta CLT:** R$ {salario_liquido:.2f}")
-    st.write(f"**Vale Alimentação:** R$ {vale_alimentacao:.2f}")
     
     st.markdown("#### ⚠️ Custos e Direitos que você perde (Provisão Mensal)")
     st.write(f"- 13º Salário: R$ {decimo_terceiro:.2f}")
@@ -175,3 +175,7 @@ elif aba == "Transição CLT para MEI":
     st.markdown("---")
     st.info(f"**PONTO DE EMPATE (Mínimo para não perder dinheiro):** R$ {ponto_empate:.2f}")
     st.success(f"**PEDIDA IDEAL (Com +30% de margem):** R$ {valor_ideal:.2f}")
+    
+    # Destacando que o VA deve ser cobrado por fora
+    if vale_alimentacao > 0:
+        st.warning(f"🍔 **LEMBRETE:** Acrescentar R$ {vale_alimentacao:.2f} referentes à alimentação por fora no valor da nota ou no contrato.")
